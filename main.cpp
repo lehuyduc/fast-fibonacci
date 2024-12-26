@@ -34,8 +34,13 @@ public:
     }
 };
 
-unordered_map<int, mpz_class> dp;
+mpz_class gmp_fibo(int n) {
+    mpz_class fib_n;
+    mpz_fib_ui(fib_n.get_mpz_t(), n);
+    return fib_n;
+}
 
+unordered_map<int, mpz_class> dp;
 mpz_class& F(int n) {
     if (n <= 1) return dp[n];
     auto it = dp.find(n);
@@ -95,26 +100,17 @@ mpz_class fibo(int n)
 bool test(int L, int R)
 {
     for (int n = L; n <= R; n++) {
-        auto res1 = fibo(n);
+        auto res1 = gmp_fibo(n);
         auto res2 = F(n - 1);
         string s1 = res1.get_str();
         string s2 = res2.get_str();
+        
+        if (s1.length() != s2.length()) cout << "Wrong length\n";
 
-        //cout << s1.length() << " " << s2.length() << "\n";
-        if (s1.length() != s2.length()) cout << "Wrong lenght\n";
-        if (res1 != res2) cout << "Wrong result\n";
-
-        int dem = 0;
-        for (int i = 0; i < s1.length(); i++) if (s1[i] != s2[i]) {
-            cout << i << " " << s1[i] << " " << s2[i] << "\n";
-            dem++;
-            if (dem == 100) break;
-        }
-
-        if (dem > 0) {
+        if (s1 != s2) {
             cout << "Fail at n = " << n << "\n";
             return false;
-        }
+        }        
     }
 
     cout << "Pass all\n";
@@ -123,37 +119,37 @@ bool test(int L, int R)
 
 bool test(int n) {
     MyTimer timer;
+
+    timer.startCounter();
+    auto res1 = gmp_fibo(n);
+    double cost1 = timer.getCounterMsPrecise();
+    cout << "mpz_fib_ui cost = " << cost1 << std::endl;
+
     timer.startCounter();
     auto res2 = F(n - 1);
     double cost2 = timer.getCounterMsPrecise();
     cout << "dp cost = " << cost2 << std::endl;
 
     timer.startCounter();
-    auto res1 = fibo(n);
-    double cost1 = timer.getCounterMsPrecise();    
-    cout << "binet cost = " << cost1 << std::endl;
-    
+    auto res3 = fibo(n);
+    double cost3 = timer.getCounterMsPrecise();    
+    cout << "binet cost = " << cost3 << std::endl;    
 
     string s1 = res1.get_str();
     string s2 = res2.get_str();
-    int cnt = 0;
-    for (int i = 0; i < s1.length(); i++) if (s1[i] != s2[i]) {
-        cout << i << " " << s1[i] << " " << s2[i] << "\n";
-        cnt++;
-        if (cnt == 100) return 0;
-    }
+    string s3 = res3.get_str();
+    
+    if (s2 != s1) cout << "DP wrong answer\n";
+    if (s3 != s1) cout << "Binet wrong answer\n";
+    
+    timer.startCounter();
+    ofstream fo("output.txt");
+    fo << s1 << "\n";
+    fo.close();
+    cout << "Output string cost = " << timer.getCounterMsPrecise() << "\n";
 
-    if (cnt == 0) {        
-        timer.startCounter();
-        ofstream fo("output.txt");
-        fo << s1 << "\n";
-        fo.close();
-        cout << "Output string cost = " << timer.getCounterMsPrecise() << "\n";
-    }
-
-    return cnt == 0;
+    return true;
 }
-
 
 int main(int argc, char* argv[])
 {
