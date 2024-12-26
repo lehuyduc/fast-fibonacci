@@ -4,7 +4,12 @@
 #include <string>
 #include <sstream>
 #include <chrono>
+#include <map>
 #include <fstream>
+#include <thread>
+#include <mutex>
+#include <memory>
+#include <vector>
 using namespace std;
 
 class MyTimer {
@@ -31,14 +36,32 @@ public:
 
 unordered_map<int, mpz_class> dp;
 
-mpz_class F(int n) {
-    if (n <= 1) return 1;
+mpz_class& F(int n) {
+    if (n <= 1) return dp[n];
     auto it = dp.find(n);
     if (it != dp.end()) return it->second;
 
-    int k = n / 2;
-    if (n % 2 == 0) return dp[n] = F(k) * F(k) + F(k - 1) * F(k - 1);
-    return dp[n] = F(k) * (F(k + 1) + F(k - 1));
+    int k = n / 2;    
+    auto Fk = F(k);
+    auto Fk1 = F(k - 1);    
+    
+    if (n % 2 == 0) {
+        //return dp[n] = F(k) * F(k) + F(k - 1) * F(k - 1);
+        if (n <= 1'000'000) return dp[n] = Fk * Fk + Fk1 * Fk1;
+
+        mpz_class Fk1_sqr;
+        vector<thread> threads;
+        threads.push_back(thread([&](){
+            Fk1_sqr = Fk1 * Fk1;
+        }));
+        dp[n] = Fk * Fk;
+        threads[0].join();        
+                
+        return dp[n] += Fk1_sqr;
+    }
+    
+    //return dp[n] = F(k) * (F(k + 1) + F(k - 1));
+    return dp[n] = Fk * (Fk1 + Fk1 + Fk);
 }
 
 mpz_class fibo(int n)
@@ -101,12 +124,15 @@ bool test(int L, int R)
 bool test(int n) {
     MyTimer timer;
     timer.startCounter();
-    auto res1 = fibo(n);
-    double cost1 = timer.getCounterMsPrecise();
-
-    timer.startCounter();
     auto res2 = F(n - 1);
     double cost2 = timer.getCounterMsPrecise();
+    cout << "dp cost = " << cost2 << std::endl;
+
+    timer.startCounter();
+    auto res1 = fibo(n);
+    double cost1 = timer.getCounterMsPrecise();    
+    cout << "binet cost = " << cost1 << std::endl;
+    
 
     string s1 = res1.get_str();
     string s2 = res2.get_str();
@@ -117,10 +143,7 @@ bool test(int n) {
         if (cnt == 100) return 0;
     }
 
-    if (cnt == 0) {
-        cout << "binet cost = " << cost1 << "\n";
-        cout << "dp cost = " << cost2 << "\n";
-
+    if (cnt == 0) {        
         timer.startCounter();
         ofstream fo("output.txt");
         fo << s1 << "\n";
@@ -128,7 +151,6 @@ bool test(int n) {
         cout << "Output string cost = " << timer.getCounterMsPrecise() << "\n";
     }
 
-    
     return cnt == 0;
 }
 
@@ -141,6 +163,9 @@ int main(int argc, char* argv[])
     int L = (argc > 1) ? atoi(argv[1]) : 10000000;
     int R = (argc > 2) ? atoi(argv[2]) : L;
     R = max(L, R);
+
+    dp[0] = 1;
+    dp[1] = 1;
 
     bool result;
     if (L == R) result = test(L);
