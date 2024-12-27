@@ -63,7 +63,7 @@ my_mpz_fib_ui (mpz_ptr fn, unsigned long n)
   TMP_MARK;
   TMP_ALLOC_LIMBS_2 (xp,xalloc, yp,xalloc);  
   size = mpn_fib2_ui (xp, yp, n2);
-  // cout << "GMP phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
+  cout << "GMP phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
 
   if (n & 1)
     {
@@ -176,6 +176,31 @@ void mpz_class_reserve_bits(mpz_class& x, mp_bitcnt_t bitcount)
     mpz_realloc2(x.get_mpz_t(), bitcount);
 }
 
+// Function to compute a = b * b using mpn_sqr
+void square_with_mpn(mpz_class& a, const mpz_class& b) {
+    // Access the internal mpz_t of b
+    auto b_mpz = b.get_mpz_t();
+    mp_ptr b_limbs = b_mpz->_mp_d;         // Limb data of b
+    mp_size_t b_size = abs(b_mpz->_mp_size); // Number of limbs in b
+
+    // Access the internal mpz_t of a
+    auto a_mpz = a.get_mpz_t();
+
+    // Ensure a has enough space to store the result (2 * b_size limbs for squaring)
+    mpz_realloc2(a_mpz, 2 * b_size * GMP_LIMB_BITS);    
+
+    // Perform the squaring operation: a = b * b
+    mpn_sqr(a_mpz->_mp_d, b_limbs, b_size);
+
+    // Determine the number of significant limbs in the result
+    mp_size_t result_size = 2 * b_size;
+    while (result_size > 0 && a_mpz->_mp_d[result_size - 1] == 0) {
+        result_size--; // Trim trailing zero limbs
+    }
+    // Update a's size (always positive since it's a square)
+    a_mpz->_mp_size = result_size;    
+}
+
 mpz_class best_fibo(int n) {
     if (n <= 100) return gmp_fibo(n);
     //cout << "AAA" << std::endl;
@@ -187,8 +212,8 @@ mpz_class best_fibo(int n) {
     bool flag = 0;
     map<int, mpz_class*> temps;
 
-    for (int i = 0; i < 3; i++) mpz_class_reserve_bits(f[i], n + 64);
-    mpz_class_reserve_bits(dummy, 2 * n + 64);
+    for (int i = 0; i < 3; i++) mpz_class_reserve_bits(f[i], 64 * n + 64);
+    mpz_class_reserve_bits(dummy, 64 * n + 64);
 
     cout << "n = " << n << std::endl;
     MyTimer timer;
@@ -265,14 +290,18 @@ mpz_class best_fibo(int n) {
             // F[2k+1] = 4*F[k]^2 - F[k-1]^2 + 2*(-1)^k
             // F[2k-1] =   F[k]^2 + F[k-1]^2
             // F[2k] = F[2k+1] - F[2k-1]
+
             Fk *= Fk;
             Fk1 *= Fk1;
-            Fk2 = 4 * Fk - Fk1 + 2 * sign; // F2k = F[2k + 1]
+            Fk2 = 4 * Fk - Fk1 + 2 * sign; // Fk2 = F[2k + 1]
             Fk1 += Fk;
             Fk = Fk2 - Fk1;
+
             temps[N - 1] = &Fk1;            
             temps[N] = &Fk;
             temps[N + 1] = &Fk2;
+
+            // cout << N << " " << Fk1 << " " << Fk << " " << Fk2 << std::endl;
 
 
             //Fk1 = 2 * Fk1 + Fk; // F(2k) = F(k) * (F(k) + 2 * F(k - 1)) = (Fk * Fk) + (2 * Fk1 * Fk1)
@@ -285,19 +314,28 @@ mpz_class best_fibo(int n) {
     }
 
     //cout << "Finish phase 1" << std::endl;
-    // cout << "phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
+    cout << "phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
     int k = n / 2;
     auto& Fk = *temps[k];
     auto& Fk1 = *temps[k - 1];
+    int sign = (k % 2 == 0) ? 1 : -1;
     //cout << "final k = " << k << " " << Fk << " " << Fk1 << "\n";
 
     // cout << "size = " << mpz_size(Fk.get_mpz_t()) << "\n";
     // auto fibo_n = gmp_fibo(n);
     // cout << "fibo size = " << mpz_size(fibo_n.get_mpz_t()) << "\n";
 
-    if (n % 2 == 0) return Fk * (Fk + 2 * Fk1);
-    int sign = (k % 2 == 0) ? 1 : -1;
-    return (2 * Fk + Fk1) * (2 * Fk - Fk1) + 2 * sign;
+    if (n % 2 == 0) {
+        //return Fk * (Fk + 2 * Fk1);
+        Fk1 *= 2;
+        Fk *= (Fk + Fk1);
+        return std::move(Fk);
+    }
+
+    //return (2 * Fk + Fk1) * (2 * Fk - Fk1) + 2 * sign;
+    Fk *= 2;
+    Fk1 = (Fk + Fk1) * (Fk - Fk1) + 2 * sign;
+    return std::move(Fk1);
 }
 
 mpz_class binet_fibo(int n)
