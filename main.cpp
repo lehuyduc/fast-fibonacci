@@ -69,19 +69,27 @@ void list_dependency(map<int,int>& mp, int n) {
     list_dependency(mp, n / 2 - 1);
 }
 
+void mpz_class_reserve_bits(mpz_class& x, mp_bitcnt_t bitcount)
+{
+    // mpz_realloc2 is a C function, so we must call it on x.get_mpz_t().
+    mpz_realloc2(x.get_mpz_t(), bitcount);
+}
+
 mpz_class best_fibo(int n) {
     if (n <= 100) return gmp_fibo(n);
     //cout << "AAA" << std::endl;
     map<int,int> mp;
     list_dependency(mp, n);
     
-    mpz_class f[3][2];
+    mpz_class f[3];
     bool started = false;
     bool flag = 0;
     map<int, mpz_class*> temps;
 
-    // cout << "n = " << n << std::endl;
-    //for (auto [key, value] : mp) cout << key << "\n";
+    for (int i = 0; i < 3; i++) mpz_class_reserve_bits(f[i], n + 64);
+
+    cout << "n = " << n << std::endl;
+    // for (auto [key, value] : mp) cout << key << "\n";
     // cout << std::endl;
 
     for (auto &[key, value] : mp)
@@ -91,13 +99,12 @@ mpz_class best_fibo(int n) {
         //cout << "key = " << N << std::endl;
 
         if (!started) {
-            f[0][0] = gmp_fibo(N - 1);
-            f[1][0] = gmp_fibo(N);
-            f[2][0] = f[0][0] + f[1][0];
-            temps[N - 1] = &f[0][0];
-            temps[N] = &f[1][0];
-            temps[N + 1] = &f[2][0];
-            flag ^= 1;
+            f[0] = gmp_fibo(N - 1);
+            f[1] = gmp_fibo(N);
+            f[2] = f[0] + f[1];
+            temps[N - 1] = &f[0];
+            temps[N] = &f[1];
+            temps[N + 1] = &f[2];
             started = true;
             continue;
         }
@@ -110,25 +117,37 @@ mpz_class best_fibo(int n) {
         // F[2k+1] = (2F[k]+F[k-1])*(2F[k]-F[k-1]) + 2*(-1)^k
         int k = N / 2;
         auto &Fk = *temps[k];
-        auto &Fk1 = *temps[k - 1];
+        auto &Fk1 = *temps[k - 1];        
         //cout << "k = " << k << "\n" << Fk << "\n" << Fk1 << "\n-------\n" << std::endl;
         int sign = (k % 2 == 0) ? 1 : -1;
-        if (N % 2 == 1) {
-            f[0][flag] = Fk * (Fk + 2 * Fk1);
-            f[1][flag] = (2 * Fk + Fk1) * (2 * Fk - Fk1) + 2 * sign;            
-        } else {
-            auto& Fk2 = *temps[k - 2];
-            f[0][flag] = (2 * Fk1 + Fk2) * (2 * Fk1 - Fk2) - 2 * sign;
-            f[1][flag] = Fk * (Fk + 2 * Fk1);
-        }
-        f[2][flag] = f[0][flag] + f[1][flag];
-        //cout << "N = " << N << ": " << f[0][flag] << " " << f[1][flag] << " " << f[2][flag] << std::endl;
+        //cout << N << " " << k << " " <<  Fk << " " << Fk1 << " " << Fk2 << std::endl;
 
-        temps.clear();
-        temps[N - 1] = &f[0][flag];
-        temps[N] = &f[1][flag];
-        temps[N + 1] = &f[2][flag];
-        flag ^= 1;
+        if (N % 2 == 1) {
+            // in this case, previous F[k+1] is unused. We that to store temporary result
+            //auto &Fkb = (temps.count(k + 1)) ? (*temps[k + 1]) : (*temps[k - 1]);
+            auto& Fkb = *temps[k + 1];
+            
+            // Use f[k + 1] to store F[n - 1], f[k] = F[n], F[k - 1] = F[n + 1]
+            Fkb = Fk * (Fk + 2 * Fk1);     
+            Fk = (2 * Fk + Fk1) * (2 * Fk - Fk1) + 2 * sign;
+            Fk1 = Fkb + Fk;
+            temps.clear();
+            temps[N - 1] = &Fkb;
+            temps[N] = &Fk;
+            temps[N + 1] = &Fk1;
+        } else {
+            // in this case, F[k - 2] is unsed. Use it to store F[n - 1]
+            auto& Fk2 = *temps[k - 2];
+            //cout << Fk2 << std::endl;
+            Fk2 = (2 * Fk1 + Fk2) * (2 * Fk1 - Fk2) - 2 * sign;
+            //cout << Fk2 << "A\n" << std::endl;
+            Fk1 = Fk * (Fk + 2 * Fk1);
+            Fk = Fk2 + Fk1;
+            temps.clear();
+            temps[N - 1] = &Fk2;
+            temps[N] = &Fk1;
+            temps[N + 1] = &Fk;
+        }
     }
 
     //cout << "Finish phase 1" << std::endl;
@@ -136,6 +155,10 @@ mpz_class best_fibo(int n) {
     int k = n / 2;
     auto& Fk = *temps[k];
     auto& Fk1 = *temps[k - 1];
+
+    // cout << "size = " << mpz_size(Fk.get_mpz_t()) << "\n";
+    // auto fibo_n = gmp_fibo(n);
+    // cout << "fibo size = " << mpz_size(fibo_n.get_mpz_t()) << "\n";
 
     if (n % 2 == 0) return Fk * (Fk + 2 * Fk1);
     int sign = (k % 2 == 0) ? 1 : -1;
