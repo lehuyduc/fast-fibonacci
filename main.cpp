@@ -36,9 +36,110 @@ public:
     }
 };
 
+
+
+void
+my_mpz_fib_ui (mpz_ptr fn, unsigned long n)
+{
+    MyTimer timer;
+  mp_ptr         fp, xp, yp;
+  mp_size_t      size, xalloc;
+  unsigned long  n2;
+  mp_limb_t      c;
+  TMP_DECL;
+  timer.startCounter();
+
+  if (n <= FIB_TABLE_LIMIT)
+    {
+      MPZ_NEWALLOC (fn, 1)[0] = FIB_TABLE (n);
+      SIZ(fn) = (n != 0);      /* F[0]==0, others are !=0 */
+      return;
+    }
+
+  n2 = n/2;
+  xalloc = MPN_FIB2_SIZE (n2) + 1;
+  fp = MPZ_NEWALLOC (fn, 2 * xalloc);
+
+  TMP_MARK;
+  TMP_ALLOC_LIMBS_2 (xp,xalloc, yp,xalloc);  
+  size = mpn_fib2_ui (xp, yp, n2);
+  // cout << "GMP phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
+
+  if (n & 1)
+    {
+      /* F[2k+1] = (2F[k]+F[k-1])*(2F[k]-F[k-1]) + 2*(-1)^k  */
+      mp_size_t  xsize, ysize;
+
+#if HAVE_NATIVE_mpn_add_n_sub_n
+      xp[size] = mpn_lshift (xp, xp, size, 1);
+      yp[size] = 0;
+      ASSERT_NOCARRY (mpn_add_n_sub_n (xp, yp, xp, yp, size+1));
+      xsize = size + (xp[size] != 0);
+      ASSERT (yp[size] <= 1);
+      ysize = size + yp[size];
+#else
+      mp_limb_t  c2;
+
+      c2 = mpn_lshift (fp, xp, size, 1);
+      c = c2 + mpn_add_n (xp, fp, yp, size);
+      xp[size] = c;
+      xsize = size + (c != 0);
+      c2 -= mpn_sub_n (yp, fp, yp, size);
+      yp[size] = c2;
+      ASSERT (c2 <= 1);
+      ysize = size + c2;
+#endif
+
+      size = xsize + ysize;
+      c = mpn_mul (fp, xp, xsize, yp, ysize);
+
+#if GMP_NUMB_BITS >= BITS_PER_ULONG
+      /* no overflow, see comments above */
+      ASSERT (n & 2 ? fp[0] >= 2 : fp[0] <= GMP_NUMB_MAX-2);
+      fp[0] += (n & 2 ? -CNST_LIMB(2) : CNST_LIMB(2));
+#else
+      if (n & 2)
+	{
+	  ASSERT (fp[0] >= 2);
+	  fp[0] -= 2;
+	}
+      else
+	{
+	  ASSERT (c != GMP_NUMB_MAX); /* because it's the high of a mul */
+	  c += mpn_add_1 (fp, fp, size-1, CNST_LIMB(2));
+	  fp[size-1] = c;
+	}
+#endif
+    }
+  else
+    {
+      /* F[2k] = F[k]*(F[k]+2F[k-1]) */
+
+      mp_size_t  xsize, ysize;
+#if HAVE_NATIVE_mpn_addlsh1_n
+      c = mpn_addlsh1_n (yp, xp, yp, size);
+#else
+      c = mpn_lshift (yp, yp, size, 1);
+      c += mpn_add_n (yp, yp, xp, size);
+#endif
+      yp[size] = c;
+      xsize = size;
+      ysize = size + (c != 0);
+      size += ysize;
+      c = mpn_mul (fp, yp, ysize, xp, xsize);
+    }
+
+  /* one or two high zeros */
+  size -= (c == 0);
+  size -= (fp[size-1] == 0);
+  SIZ(fn) = size;
+
+  TMP_FREE;
+}
+
 mpz_class gmp_fibo(int n) {
     mpz_class fib_n, fib_n1;
-    mpz_fib_ui(fib_n.get_mpz_t(), n);
+    my_mpz_fib_ui(fib_n.get_mpz_t(), n);
     return fib_n;
 }
 
@@ -81,14 +182,17 @@ mpz_class best_fibo(int n) {
     map<int,int> mp;
     list_dependency(mp, n);
     
-    mpz_class f[3];
+    mpz_class f[3], dummy;
     bool started = false;
     bool flag = 0;
     map<int, mpz_class*> temps;
 
     for (int i = 0; i < 3; i++) mpz_class_reserve_bits(f[i], n + 64);
+    mpz_class_reserve_bits(dummy, 2 * n + 64);
 
     cout << "n = " << n << std::endl;
+    MyTimer timer;
+    timer.startCounter();
     // for (auto [key, value] : mp) cout << key << "\n";
     // cout << std::endl;
 
@@ -110,51 +214,82 @@ mpz_class best_fibo(int n) {
         }
 
         // edge cases: 160, 170
+        // 2 3 4 5, 8 9 10, 18 19 20, 38 39 40, 79 80, 160
+        // 2 3 4 5, 8 9 10, 19 20 21, 41 42, 84 85, 170
+
         // 13 14 15, 29 30 31, 61 62 63, 125 126 252
         // 13 14 15, 29 30 31, 61 62 63, 125 126 253
         // 13 14 15, 29 30 31, 60 61 62, 123 124 125, 248 249 250, 499 500, 1000
         // F[2k] = F[k]*(F[k]+2F[k-1])
         // F[2k+1] = (2F[k]+F[k-1])*(2F[k]-F[k-1]) + 2*(-1)^k
+        // OR
+        // F[2k+1] = 4*F[k]^2 - F[k-1]^2 + 2*(-1)^k
+        // F[2k-1] =   F[k]^2 + F[k-1]^2
+        // F[2k] = F[2k+1] - F[2k-1]
+
         int k = N / 2;
         auto &Fk = *temps[k];
-        auto &Fk1 = *temps[k - 1];        
+        auto &Fk1 = *temps[k - 1];                
         //cout << "k = " << k << "\n" << Fk << "\n" << Fk1 << "\n-------\n" << std::endl;
         int sign = (k % 2 == 0) ? 1 : -1;
-        //cout << N << " " << k << " " <<  Fk << " " << Fk1 << " " << Fk2 << std::endl;
+        //cout << N << " " << k << " " <<  Fk << " " << Fk1 << std::endl;
 
         if (N % 2 == 1) {
             // in this case, previous F[k+1] is unused. We that to store temporary result
-            //auto &Fkb = (temps.count(k + 1)) ? (*temps[k + 1]) : (*temps[k - 1]);
-            auto& Fkb = *temps[k + 1];
-            
+            auto& Fkb = *temps[k + 1];            
             // Use f[k + 1] to store F[n - 1], f[k] = F[n], F[k - 1] = F[n + 1]
-            Fkb = Fk * (Fk + 2 * Fk1);     
-            Fk = (2 * Fk + Fk1) * (2 * Fk - Fk1) + 2 * sign;
-            Fk1 = Fkb + Fk;
+            // Fkb = Fk * (Fk + 2 * Fk1); // Fkb = F(2k) = F(N - 1)
+            // Fk = (2 * Fk + Fk1) * (2 * Fk - Fk1) + 2 * sign;
+
+            // this one is correct            
+            // Fkb = 4 * (Fk * Fk) - Fk1 * Fk1 + 2 * sign; // Fkb = F[2 * k + 1] = F[N]
+            // Fk = Fk * (Fk + 2 * Fk1); // Fk = F[2 * K] = F[n - 1]            
+
+            Fk *= Fk;
+            Fk1 *= Fk1;
+            Fkb = 4 * Fk - Fk1 + 2 * sign; // Fkb = F[2 * k + 1] = F[N]
+            Fk1 += Fk; // Fk1 = F[2 * k - 1] = F[n - 2]
+            Fk = Fkb - Fk1; // F[k] = F[2 * k] = F[n - 1]
+
+            if (mp.count(N + 1)) Fk1 = Fkb + Fk;
             temps.clear();
-            temps[N - 1] = &Fkb;
-            temps[N] = &Fk;
+            temps[N - 1] = &Fk;
+            temps[N] = &Fkb;
             temps[N + 1] = &Fk1;
         } else {
-            // in this case, F[k - 2] is unsed. Use it to store F[n - 1]
-            auto& Fk2 = *temps[k - 2];
-            //cout << Fk2 << std::endl;
-            Fk2 = (2 * Fk1 + Fk2) * (2 * Fk1 - Fk2) - 2 * sign;
-            //cout << Fk2 << "A\n" << std::endl;
-            Fk1 = Fk * (Fk + 2 * Fk1);
-            Fk = Fk2 + Fk1;
-            temps.clear();
-            temps[N - 1] = &Fk2;
-            temps[N] = &Fk1;
-            temps[N + 1] = &Fk;
+            // in this case, F[k - 2] is unused. Use it to store F[n - 1]
+            auto& Fk2 = *temps[k - 2];            
+            // Fk2 = (2 * Fk1 + Fk2) * (2 * Fk1 - Fk2) - 2 * sign;            
+            // Fk1 = Fk * (Fk + (Fk1 + Fk1));
+
+            // F[2k+1] = 4*F[k]^2 - F[k-1]^2 + 2*(-1)^k
+            // F[2k-1] =   F[k]^2 + F[k-1]^2
+            // F[2k] = F[2k+1] - F[2k-1]
+            Fk *= Fk;
+            Fk1 *= Fk1;
+            Fk2 = 4 * Fk - Fk1 + 2 * sign; // F2k = F[2k + 1]
+            Fk1 += Fk;
+            Fk = Fk2 - Fk1;
+            temps[N - 1] = &Fk1;            
+            temps[N] = &Fk;
+            temps[N + 1] = &Fk2;
+
+
+            //Fk1 = 2 * Fk1 + Fk; // F(2k) = F(k) * (F(k) + 2 * F(k - 1)) = (Fk * Fk) + (2 * Fk1 * Fk1)
+            // if (mp.count(N + 1)) Fk = Fk2 + Fk1;
+            // temps.clear();
+            // temps[N - 1] = &Fk2;
+            // temps[N] = &Fk1;
+            // temps[N + 1] = &Fk;
         }
     }
 
     //cout << "Finish phase 1" << std::endl;
-    
+    // cout << "phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
     int k = n / 2;
     auto& Fk = *temps[k];
     auto& Fk1 = *temps[k - 1];
+    //cout << "final k = " << k << " " << Fk << " " << Fk1 << "\n";
 
     // cout << "size = " << mpz_size(Fk.get_mpz_t()) << "\n";
     // auto fibo_n = gmp_fibo(n);
@@ -215,17 +350,18 @@ bool test(int L, int R)
 }
 
 bool test(int n) {
-    MyTimer timer;
-
-    timer.startCounter();
-    auto res1 = gmp_fibo(n);
-    double cost1 = timer.getCounterMsPrecise();
-    cout << "mpz_fib_ui cost = " << cost1 << std::endl;
+    MyTimer timer;    
 
     timer.startCounter();
     auto res2 = dp_fibo(n);
     double cost2 = timer.getCounterMsPrecise();
     cout << "dp cost = " << cost2 << std::endl;
+
+    timer.startCounter();
+    auto res1 = gmp_fibo(n);
+    double cost1 = timer.getCounterMsPrecise();    
+    cout << "mpz_fib_ui cost = " << cost1 << std::endl;
+
 
     timer.startCounter();
     auto res3 = best_fibo(n);
@@ -242,9 +378,10 @@ bool test(int n) {
     string s3 = res3.get_str();
     string s4 = res4.get_str();
     
-    if (s2 != s1) cout << "DP wrong answer\n";
-    if (s3 != s1) cout << "Non-recursive DP wrong answer\n";
-    if (s4 != s1) cout << "Binet wrong answer\n";
+    bool ok = true;
+    if (s2 != s1) {cout << "DP wrong answer\n"; ok = false;};
+    if (s3 != s1) {cout << "Non-recursive DP wrong answer\n"; ok = false;}
+    if (s4 != s1) {cout << "Binet wrong answer\n"; ok = false;}
     
     timer.startCounter();
     ofstream fo("output.txt");
@@ -252,7 +389,7 @@ bool test(int n) {
     fo.close();
     cout << "Output string cost = " << timer.getCounterMsPrecise() << "\n";
 
-    return true;
+    return ok;
 }
 
 int main(int argc, char* argv[])
@@ -289,3 +426,4 @@ int main(int argc, char* argv[])
     else cout << "Wrong\n";
     return 0;
 }
+ 
