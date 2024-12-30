@@ -14,6 +14,13 @@
 #include "longlong.h"
 using namespace std;
 
+// Important functions:
+// gmp_fibo
+// F(int n), dp_fibo
+// best_fibo
+// binet_fibo
+// matrix_fibo
+
 class MyTimer {
     std::chrono::time_point<std::chrono::system_clock> start;
 
@@ -267,9 +274,7 @@ mpz_class best_fibo(int n) {
 
 mpz_class binet_fibo(int n)
 {
-    // Increase default precision so we don't lose accuracy for large n.
-    // A rough rule of thumb is ~ (log2(phi) * n) + a margin; here we do ~ 2*n + 32 bits.
-    mp_bitcnt_t bitcount = 2 * n + 32;
+    // Increase default precision so we don't lose accuracy for large n.    
     
     mpf_set_default_prec(n + 64);
 
@@ -291,6 +296,59 @@ mpz_class binet_fibo(int n)
     mpz_class result = mpz_class(result_float);
 
     return result;
+}
+
+struct Matrix {
+    int n;
+    vector<mpz_class> data;
+
+    Matrix(int n) {
+        this->n = n;
+        data.resize(n * n);
+    }
+
+    Matrix(int n, const vector<int> &a) {
+        this->n = n;
+        data.resize(n * n);
+        for (int i = 0; i < n * n; i++) data[i] = a[i];        
+    }
+
+    mpz_class& get(int row, int col) {
+        return data[row * n + col];
+    }
+
+    const mpz_class& get(int row, int col) const {
+        return data[row * n + col];
+    }
+
+
+    Matrix& operator*=(const Matrix& other) {
+        Matrix dummy(n);
+
+        for (int i = 0; i < n; i++)
+        for (int j = 0; j < n; j++) {
+            dummy.get(i, j) = 0;
+            for (int k = 0; k < n; k++)
+                dummy.get(i, j) += get(i, k) * other.get(k, j);
+        }
+
+        for (int i = 0; i < n * n; i++) data[i] = std::move(dummy.data[i]);        
+        return *this;
+    }
+};
+
+mpz_class matrix_fibo(int n) {
+    if (n <= 2) return 1;
+    n--;
+    Matrix pow = Matrix(2, {1, 1, 1, 0});
+    Matrix res = Matrix(2, {1, 0, 0, 1});
+    
+    while (n > 0) {
+        if (n & 1) res *= pow;
+        pow *= pow;
+        n >>= 1;
+    }
+    return res.data[0];
 }
 
 bool test(int L, int R)
@@ -335,9 +393,16 @@ bool test(int n) {
     cout << "dp no-recursion cost = " << cost3 << std::endl;    
 
     timer.startCounter();
+    //auto res4 = res1;
     auto res4 = binet_fibo(n);
     double cost4 = timer.getCounterMsPrecise();
     cout << "binet cost = " << cost4 << std::endl;
+
+    timer.startCounter();
+    //auto res5 = res1;
+    auto res5 = matrix_fibo(n);
+    double cost5 = timer.getCounterMsPrecise();
+    cout << "matrix cost = " << cost5 << std::endl;
 
     timer.startCounter();
     string s1 = res1.get_str();
@@ -345,11 +410,13 @@ bool test(int n) {
     string s2 = res2.get_str();
     string s3 = res3.get_str();
     string s4 = res4.get_str();
+    string s5 = res5.get_str();
     
     bool ok = true;
     if (s2 != s1) {cout << "DP wrong answer\n"; ok = false;};
     if (s3 != s1) {cout << "Non-recursive DP wrong answer\n"; ok = false;}
     if (s4 != s1) {cout << "Binet wrong answer\n"; ok = false;}
+    if (s5 != s1) {cout << "Matrix wrong answer\n"; ok = false;}
     
     timer.startCounter();
     ofstream fo("output.txt");
@@ -382,3 +449,4 @@ int main(int argc, char* argv[])
     else cout << "Wrong\n";
     return 0;
 }
+ 
