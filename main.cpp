@@ -194,7 +194,7 @@ mpz_class best_fibo(int n) {
             auto& Fkb = *temps[k + 1];            
             // Use f[k + 1] to store F[n - 1], f[k] = F[n], F[k - 1] = F[n + 1]
 
-            if (n >= 1'000'000'000) {
+            if (n >= 50'000'000) {
                 threads.clear();
                 threads.emplace_back([&]() {
                     Fk *= Fk;
@@ -222,7 +222,7 @@ mpz_class best_fibo(int n) {
             // in this case, F[k - 2] is unused. Use it to store F[n - 1]
             auto& Fk2 = *temps[k - 2];            
 
-            if (n >= 1'000'000'000) {
+            if (n >= 50'000'000) {
                 threads.clear();
                 threads.emplace_back([&]() {
                     Fk *= Fk;
@@ -339,7 +339,9 @@ bool test(int n) {
     double cost4 = timer.getCounterMsPrecise();
     cout << "binet cost = " << cost4 << std::endl;
 
+    timer.startCounter();
     string s1 = res1.get_str();
+    cout << "cost to convert number to base10 string = " << timer.getCounterMsPrecise() << std::endl;
     string s2 = res2.get_str();
     string s3 = res3.get_str();
     string s4 = res4.get_str();
@@ -380,4 +382,3 @@ int main(int argc, char* argv[])
     else cout << "Wrong\n";
     return 0;
 }
- 
