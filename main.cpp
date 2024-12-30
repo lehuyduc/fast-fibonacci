@@ -335,7 +335,7 @@ bool test(int n) {
     cout << "dp no-recursion cost = " << cost3 << std::endl;    
 
     timer.startCounter();
-    auto res4 = res1; //binet_fibo(n);
+    auto res4 = binet_fibo(n);
     double cost4 = timer.getCounterMsPrecise();
     cout << "binet cost = " << cost4 << std::endl;
 
