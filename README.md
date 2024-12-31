@@ -12,6 +12,9 @@ chmod +x run.sh
 # To calculate all numbers in a range and validate the result, use: ./run.sh {L} {R}
 ./run 1000 100000
 
+# To find sum of even-value Fibonacci number <= Fibo(n), use: ./run.sh -{n}
+./run.sh -1000
+# The above print sum of Fibonacci number with even value <= F(1000)
 ```
 
 Tested on Ubuntu 18.04 and Ryzen 5900X, `best_fibo` can compute the `4*10^8`-th Fibonacci number in 0.99 second
