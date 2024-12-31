@@ -53,22 +53,24 @@ mpz_class gmp_fibo(int n) {
 
 unordered_map<int, mpz_class> dp;
 mpz_class& F(int n) {
-    if (n <= 1) return dp[n];
+    if (n <= 2) return dp[n];
     auto it = dp.find(n);
     if (it != dp.end()) return it->second;
 
     int k = n / 2;
     auto Fk = F(k);
-    auto Fk1 = F(k - 1);
+    auto Fk1 = F(k - 1);    
+
     if (n % 2 == 0) {           
-        return dp[n] = Fk * Fk + Fk1 * Fk1;
+        return dp[n] = Fk * (Fk + 2 * Fk1);
     }
 
-    return dp[n] = Fk * (Fk1 + Fk1 + Fk);
+    int sign = (k % 2 == 0) ? 1 : - 1;
+    return dp[n] = (2 * Fk + Fk1) * (2 * Fk - Fk1) + 2 * sign;
 }
 
 mpz_class dp_fibo(int n) {
-    return F(n - 1);
+    return F(n);
 }
 
 void list_dependency(map<int,int>& mp, int n) {    
@@ -436,10 +438,10 @@ int main(int argc, char* argv[])
     int R = (argc > 2) ? atoi(argv[2]) : L;
     R = max(L, R);
 
-    dp[0] = 1;
+    dp[0] = 0;
     dp[1] = 1;
-    dp[2] = 2;
-    dp[3] = 3;
+    dp[2] = 1;
+    dp[3] = 2;
 
     bool result;
     if (L == R) result = test(L);
