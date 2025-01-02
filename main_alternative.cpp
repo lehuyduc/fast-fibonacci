@@ -17,7 +17,7 @@ using namespace std;
 // Important functions:
 // gmp_fibo
 // F(int n), dp_fibo
-// best_fibo
+// fast_doubling_fibo
 // binet_fibo
 // matrix_fibo
 
@@ -56,6 +56,10 @@ mpz_class& F(int n) {
     if (n <= 2) return dp[n];
     auto it = dp.find(n);
     if (it != dp.end()) return it->second;
+
+    if (dp.count(n - 1) && dp.count(n - 2)) return dp[n] = dp[n-1] + dp[n-2];
+    if (dp.count(n - 1) && dp.count(n + 1)) return dp[n] = dp[n + 1] - dp[n - 1];
+    if (dp.count(n + 1) && dp.count(n + 2)) return dp[n] = dp[n + 2] - dp[n + 1];
 
     int k = n / 2;
     auto Fk = F(k);
@@ -162,7 +166,9 @@ void mpz_square_using_mpn(mpz_class &dest, const mpz_class &src) {
     mpz_limbs_finish(dest.get_mpz_t(), required_size);
 }
 
-mpz_class best_fibo(int n) {
+const int THREAD_THRESHOLD = 500'000'000;
+
+mpz_class fast_doubling_fibo(int n) {
     if (n <= 100) return gmp_fibo(n);
     map<int,int> mp;
     list_dependency(mp, n);
@@ -225,20 +231,20 @@ mpz_class best_fibo(int n) {
             auto& Fkb = *temps[k + 1];            
             // Use f[k + 1] to store F[n - 1], f[k] = F[n], F[k - 1] = F[n + 1]
 
-            if (n >= 500'000'000) {
+            if (n >= THREAD_THRESHOLD) {
                 threads.clear();
                 threads.emplace_back([&]() {
                     Fk *= Fk;
                     // mpz_square_using_mpn(Fkb, Fk);
                     // Fk = std::move(Fkb);
                 });
-                Fk1 *= Fk1;     
+                Fk1 *= Fk1;
                 // mpz_square_using_mpn(dummy, Fk1);
                 // Fk1 = std::move(dummy);
                 threads[0].join();
             } else {
-                // mpz_square_using_mpn(Fkb, Fk);
-                // Fk = std::move(Fkb);
+                // mpz_square_using_mpn(dummy, Fk);
+                // Fk = std::move(dummy);
                 // mpz_square_using_mpn(dummy, Fk1);
                 // Fk1 = std::move(dummy);
                 Fk *= Fk;
@@ -261,7 +267,7 @@ mpz_class best_fibo(int n) {
             // in this case, F[k - 2] is unused. Use it to store F[n - 1]
             auto& Fk2 = *temps[k - 2];            
 
-            if (n >= 500'000'000) {
+            if (n >= THREAD_THRESHOLD) {
                 threads.clear();
                 threads.emplace_back([&]() {
                     Fk *= Fk;
@@ -269,8 +275,8 @@ mpz_class best_fibo(int n) {
                 Fk1 *= Fk1;     
                 threads[0].join();
             } else {
-                // mpz_square_using_mpn(Fk2, Fk);
-                // Fk = std::move(Fk2);
+                // mpz_square_using_mpn(dummy, Fk);
+                // Fk = std::move(dummy);
                 // mpz_square_using_mpn(dummy, Fk1);
                 // Fk1 = std::move(dummy);
                 Fk *= Fk;
@@ -289,7 +295,7 @@ mpz_class best_fibo(int n) {
             temps[N + 1] = &Fk2;
         }
     }
-    cout << "best_fibo phase 1 = " << timer.getCounterMsPrecise() << "\n";
+    //cout << "fast_doubling_fibo phase 1 = " << timer.getCounterMsPrecise() << "\n";
     int k = n / 2;
     auto& Fk = *temps[k];
     auto& Fk1 = *temps[k - 1];
@@ -309,7 +315,6 @@ mpz_class best_fibo(int n) {
 }
 
 unordered_map<int, mpz_class> lucas_dp;
-vector<thread> threads;
 mpz_class& lucas_dfs(int n, map<int,int> &mp) {
     if (n <= 3) return lucas_dp[n];
     auto it = lucas_dp.find(n);
@@ -324,65 +329,42 @@ mpz_class& lucas_dfs(int n, map<int,int> &mp) {
     auto& tmp2 = lucas_dfs(m + 1, mp);
     int q = (m % 2 == 0) ? 2 : -2;
     mpz_class u, v;
-
-    if (n % 2 == 1) {
-        // return v - u, v
+    
+    if (n >= THREAD_THRESHOLD) {
+        vector<thread> threads;
+        threads.clear();
+        threads.emplace_back([&]() {
+            mpz_square_using_mpn(v, tmp2);
+            v += q;
+        });
+        mpz_square_using_mpn(u, tmp1);
+        u -= q;        
+        threads[0].join();
+    } else {
         mpz_square_using_mpn(u, tmp1);
         mpz_square_using_mpn(v, tmp2);
         u -= q;
         v += q;
-        u = v - u;
-        if (mp.count(n + 1) && !lucas_dp.count(n + 1)) lucas_dp[n + 1] = std::move(v);        
-        return lucas_dp[n] = std::move(u);
     }
 
-    mpz_square_using_mpn(u, tmp1);
-    u -= q;
-    if (mp.count(n + 1) && !lucas_dp.count(n + 1) && lucas_dp.count(n - 1)) {
-        lucas_dp[n + 1] = lucas_dp[n - 1] + u;
+    if (n % 2 == 1) {
+        // return v - u, v        
+        if (mp.count(n + 1) && !lucas_dp.count(n + 1)) {
+            lucas_dp[n + 1] = std::move(v);
+        }
+        u = lucas_dp[n + 1] - u;
+        lucas_dp[n] = std::move(u);        
+    } else {
+        //  return u, v - u
+        if (!lucas_dp.count(n + 1)) {
+            v -= u;
+            lucas_dp[n + 1] = std::move(v);
+        }
+        lucas_dp[n] = std::move(u);
     }
 
-    if (mp.count(n + 1) && !lucas_dp.count(n + 1)) {
-        mpz_square_using_mpn(v, tmp2);
-        v += q;
-        v -= u;
-        lucas_dp[n + 1] = std::move(v);
-    }
-    return lucas_dp[n] = std::move(u);
-    
-    // if (n >= 50'000'000) {
-    //     threads.clear();
-    //     threads.emplace_back([&]() {
-    //         //mpz_square_using_mpn(v, tmp2);
-    //         v = tmp2 * tmp2 + q;            
-    //     });
-    //     // mpz_square_using_mpn(u, tmp1);
-    //     // u -= q;                
-    //     u = tmp1 * tmp1 - q;
-    //     threads[0].join();
-    // } else {
-    //     mpz_square_using_mpn(u, tmp1);
-    //     mpz_square_using_mpn(v, tmp2);        
-    //     // u -= q;
-    //     // v += q;
-    //     u = tmp1 * tmp1 - q;
-    //     v = tmp2 * tmp2 + q;
-    // }                
-        
-    // if (n % 2 == 1) {
-    //     // return v - u, v
-    //     if (mp.count(n + 1) !lucas_dp.count(n + 1)) lucas_dp[n + 1] = std::move(v);
-    //     u = lucas_dp[n + 1] - u;
-    //     return lucas_dp[n] = std::move(u);
-    // }
-    
-    // //  return u, v - u
-    // if (!lucas_dp.count(n + 1)) {
-    //     v -= u;
-    //     lucas_dp[n + 1] = std::move(v);
-    // }
-    // lucas_dp[n] = std::move(u);
-    // return lucas_dp[n];
+    if (mp.count(n + 2) && !lucas_dp.count(n + 2)) lucas_dp[n + 2] = lucas_dp[n] + lucas_dp[n + 1];
+    return lucas_dp[n];
 }
 
 void list_dependency_lucas(map<int,int> &mp, int n) {
@@ -398,14 +380,13 @@ mpz_class lucas_fibo(int n) {
     if (n <= 2) return 1;
     map<int,int> mp;
     list_dependency_lucas(mp, n);
-    //for (auto &[key, value] : mp) cout << key << "\n";
     
     MyTimer timer;
     timer.startCounter();
     int m = n / 2;
     mpz_class u = lucas_dfs(m, mp);
     mpz_class v = lucas_dfs(m + 1, mp);
-    cout << "Lucas phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
+    //cout << "Lucas phase 1 cost = " << timer.getCounterMsPrecise() << "\n";
 
     mpz_class f = (2 * v - u) / 5;
     if (n % 2 == 1) {
@@ -500,7 +481,7 @@ bool test(int L, int R)
     for (int n = L; n <= R; n++) {
         cout << "n = " << n << "\n";
         auto res1 = gmp_fibo(n);
-        auto res2 = best_fibo(n);
+        auto res2 = fast_doubling_fibo(n);
         string s1 = res1.get_str();
         string s2 = res2.get_str();
         
@@ -518,50 +499,58 @@ bool test(int L, int R)
 }
 
 bool test(int n) {
-    MyTimer timer;    
+    MyTimer timer;
 
+    // Run this first to warm-up GMP and CPU
     timer.startCounter();
-    auto res2 = dp_fibo(n);
-    double cost2 = timer.getCounterMsPrecise();
-    cout << "dp cost = " << cost2 << std::endl;
+    auto res4 = dp_fibo(n);
+    double cost4 = timer.getCounterMsPrecise();
+    cout << "resursive doubling cost = " << cost4 << std::endl;
 
-    timer.startCounter();
+    timer.startCounter();    
     auto res1 = gmp_fibo(n);
     double cost1 = timer.getCounterMsPrecise();    
     cout << "mpz_fib_ui cost = " << cost1 << std::endl;
 
-
+    timer.startCounter();    
+    auto res2 = lucas_fibo(n);
+    double cost2 = timer.getCounterMsPrecise();
+    cout << "lucas_fibo cost = " << cost2 << std::endl;
+    
     timer.startCounter();
-    auto res3 = best_fibo(n);
+    auto res3 = fast_doubling_fibo(n);
     double cost3 = timer.getCounterMsPrecise();    
-    cout << "dp no-recursion cost = " << cost3 << std::endl;    
+    cout << "iterative fast doubling cost = " << cost3 << std::endl;
 
-    timer.startCounter();
-    //auto res4 = res1;
-    auto res4 = lucas_fibo(n); //binet_fibo(n);
-    double cost4 = timer.getCounterMsPrecise();
-    cout << "binet cost = " << cost4 << std::endl;
-
-    timer.startCounter();
-    //auto res5 = res1;
-    auto res5 = matrix_fibo(n);
-    double cost5 = timer.getCounterMsPrecise();
-    cout << "matrix cost = " << cost5 << std::endl;
-
+    //----------
     timer.startCounter();
     string s1 = res1.get_str();
     cout << "cost to convert number to base10 string = " << timer.getCounterMsPrecise() << std::endl;
+
+    //----------    
+    timer.startCounter();
+    auto res5 = matrix_fibo(n);
+    double cost5 = timer.getCounterMsPrecise();
+    cout << "matrix fast expo cost = " << cost5 << std::endl;
+
+    timer.startCounter();    
+    auto res6 = binet_fibo(n);
+    double cost6 = timer.getCounterMsPrecise();
+    cout << "binet cost = " << cost6 << std::endl;
+        
     string s2 = res2.get_str();
     string s3 = res3.get_str();
     string s4 = res4.get_str();
     string s5 = res5.get_str();
+    string s6 = res6.get_str();
     
     bool ok = true;
-    if (s2 != s1) {cout << "DP wrong answer\n"; ok = false;};
-    if (s3 != s1) {cout << "Non-recursive DP wrong answer\n"; ok = false;}
-    if (s4 != s1) {cout << "Binet wrong answer\n"; ok = false;}
-    if (s5 != s1) {cout << "Matrix wrong answer\n"; ok = false;}
-    
+    if (s2 != s1) {cout << "lucas_fibo WRONG ANSWER\n"; ok = false;};
+    if (s3 != s1) {cout << "iterative fast doubling WRONG ANSWER\n"; ok = false;}
+    if (s4 != s1) {cout << "recursive fast doubling WRONG ANSWER\n"; ok = false;}
+    if (s5 != s1) {cout << "binet WRONG ANSWER\n"; ok = false;}
+    if (s6 != s1) {cout << "matrix WRONG ANSWER\n"; ok = false;}
+
     timer.startCounter();
     ofstream fo("output.txt");
     fo << s1 << "\n";
@@ -589,6 +578,7 @@ int main(int argc, char* argv[])
     lucas_dp[1] = 1;
     lucas_dp[2] = 3;
     lucas_dp[3] = 4;
+    for (int i = 4; i <= 10; i++) lucas_dp[i] = lucas_dp[i-1] + lucas_dp[i-2];
 
     // for (int i = 0; i <= 30; i++) cout << i << " " << lucas_fibo(i) << "\n";
     // return 0;
@@ -598,7 +588,7 @@ int main(int argc, char* argv[])
     else result = test(L, R);    
 
     if (result) cout << "Correct\n";
-    else cout << "Wrong\n";
+    else cout << "WRONG\n";
     return 0;
 }
  
